@@ -27,6 +27,7 @@
 - [12. Checklist before publishing](#12-checklist-before-publishing)
 - [13. Security integration pattern](#13-security-integration-pattern)
 - [14. Database naming conventions](#14-database-naming-conventions)
+- [15. Agent configuration (`AGENTS.md`)](#15-agent-configuration-agentsmd)
 
 Use this file when creating or restructuring a lab repository.
 
@@ -37,13 +38,15 @@ Create the following directory and file layout. Items marked *(conditional)* are
 ```text
 <repo-root>/
 ├── README.md                          # Main entry point
-├── CONTRIBUTING.md                    # Docs style guide (reuse as-is)
+├── AGENTS.md                          # Agent/AI coding assistant configuration (canonical)
+├── CLAUDE.md -> AGENTS.md             # Symlink (Claude)
+├── QWEN.md -> AGENTS.md               # Symlink (Qwen)
 ├── CONTRIBUTORS.md                    # List of student contributors
+├── index.md                           # Repository index
 ├── lab/
 │   ├── tasks/
 │   │   ├── setup.md                   # Full first-time lab setup
 │   │   ├── setup-simple.md            # Lab-specific setup (returning students)
-│   │   ├── git-workflow.md            # Reusable Git workflow procedure
 │   │   ├── required/
 │   │   │   ├── task-1.md
 │   │   │   ├── task-2.md
@@ -51,24 +54,42 @@ Create the following directory and file layout. Items marked *(conditional)* are
 │   │   └── optional/
 │   │       ├── task-1.md
 │   │       └── ...
-│   ├── wiki/                      # Reference docs for tools & concepts
-│   │   ├── vs-code.md
-│   │   ├── git.md
-│   │   ├── git-vscode.md
-│   │   ├── github.md
-│   │   ├── shell.md
-│   │   └── ...                        # One file per tool/concept
-│   ├── design/                        # Internal design notes (not student-facing)
-│   │   ├── lab-plan.md
-│   │   ├── feedback.md
-│   │   ├── formatting.md
-│   │   └── todo.md
-│   └── images/                        # Screenshots and diagrams
-│       ├── wiki/
-│       │   ├── vs-code/
-│       │   ├── gitlens/
-│       │   └── ...
-│       └── git-workflow.drawio.svg
+│   └── images/                        # Task-specific screenshots and diagrams
+│       └── ...
+├── wiki/                              # Reference docs for tools & concepts
+│   ├── vs-code.md
+│   ├── git.md
+│   ├── git-workflow.md                # Reusable Git workflow procedure
+│   ├── git-vscode.md
+│   ├── github.md
+│   ├── shell.md
+│   ├── ...                            # One file per tool/concept
+│   └── images/                        # Wiki screenshots organized by tool
+│       ├── vs-code/
+│       ├── gitlens/
+│       └── ...
+├── contributing/                      # Lab authoring conventions
+│   ├── configuration.md               # Repo structure, setup, templates, checklist
+│   └── conventions/                   # Detailed conventions by topic
+│       ├── agents/
+│       ├── git/
+│       ├── implementation/
+│       ├── meetings/
+│       └── writing/
+├── docs/                              # Application architecture docs (conditional)
+│   ├── design/                        # Architecture and domain model
+│   └── requirements/                  # Vision and requirements
+├── instructors/                       # Internal design notes (not student-facing)
+│   ├── README.md
+│   ├── course.md
+│   ├── ideas.md
+│   ├── meetings/                      # Lab meeting notes and transcripts
+│   ├── file-reviews/                  # Review findings for lab files
+│   └── scripts/                       # Utility scripts
+├── .agents/                           # Agent skill definitions (canonical)
+│   └── skills/                        # One subdirectory per skill
+├── .claude -> .agents                 # Symlink (Claude)
+├── .qwen -> .agents                   # Symlink (Qwen)
 ├── .github/
 │   ├── ISSUE_TEMPLATE/
 │   │   ├── 01-task.yml                # Lab Task issue form
@@ -79,8 +100,8 @@ Create the following directory and file layout. Items marked *(conditional)* are
 ├── .vscode/
 │   ├── settings.json                  # Editor, formatter, ToC settings
 │   └── extensions.json                # Recommended VS Code extensions
-├── src/                               # Application source code (conditional)
-├── tests/                             # Test suite (conditional)
+├── backend/                           # Application source code (conditional)
+├── frontend/                          # Application source code (conditional)
 ├── .gitignore
 ├── .env.example                       # Template for local env vars (conditional)
 ├── .env.docker.example                # Template for Docker env vars (conditional)
@@ -298,7 +319,7 @@ Structure:
 # `Git workflow` for tasks
 
 > [!NOTE]
-> This procedure is based on the [`GitHub flow`](../../wiki/github.md#github-flow).
+> This procedure is based on the [`GitHub flow`](./github.md#github-flow).
 
 Outline:
 
@@ -317,7 +338,7 @@ Outline:
 ### 4.1. Key rules for git workflow
 
 - Every section links to the relevant wiki doc for the detailed how-to.
-- Task documents reference this file via `` [`Git workflow`](../git-workflow.md) ``.
+- Task documents reference this file via `` [`Git workflow`](../../../wiki/git-workflow.md) ``.
 - The workflow is fork-based: students fork the course repo, work in branches, create PRs to their own fork's `main`.
 - PR review rules are included: reviewer checks acceptance criteria, leaves comments, approves.
 
@@ -597,6 +618,7 @@ Replace @johndoe with @<your-username> where
 **Always required:**
 
 - [ ] `README.md` has: story, learning advice, learning outcomes, task list.
+- [ ] `AGENTS.md` exists at repo root with `CLAUDE.md` and `QWEN.md` as symlinks to it.
 - [ ] Every task file has: Time, Purpose, Context, ToC, Steps, Acceptance criteria.
 - [ ] Every terminal command has a `` [Run using the `VS Code Terminal`] `` link prefix.
 - [ ] Every Command Palette command has a `` [Run using the `Command Palette`] `` link prefix.
@@ -661,3 +683,56 @@ Name tables according to their role in the schema:
 
 - **Entity** — singular noun — `learner`, `item`
 - **Relationship** — verb — `interacts`
+
+----
+
+## 15. Agent configuration (`AGENTS.md`)
+
+The repository uses a single canonical agent configuration file that all AI coding assistants read.
+
+### File layout
+
+```text
+<repo-root>/
+├── AGENTS.md                  # Canonical agent configuration (edit this file)
+├── CLAUDE.md -> AGENTS.md     # Symlink — Claude reads this
+├── QWEN.md -> AGENTS.md       # Symlink — Qwen reads this
+└── .agents/
+    ├── settings.local.json    # Agent tool-permission settings (not committed)
+    └── skills/
+        └── <skill-name>/
+            └── SKILL.md       # One skill per subdirectory
+```
+
+Agent tool directories (`.claude/`, `.qwen/`) are symlinks to `.agents/` so all agents share the same skill definitions.
+
+### `AGENTS.md` structure
+
+`AGENTS.md` is the single source of truth for agent instructions. It follows the same structure as `CLAUDE.md`:
+
+```markdown
+# Lab authoring conventions
+
+## When editing `lab/tasks/`
+
+Read before making changes:
+
+- [`contributing/conventions/writing/common.md`](...) — writing conventions
+- [`contributing/conventions/writing/tasks.md`](...) — task structure
+
+## When editing `wiki/`
+...
+```
+
+- Use `##` sections keyed to the action (e.g., `When editing X`).
+- Each section lists the relevant convention files to read before making changes.
+- `CLAUDE.md` and `QWEN.md` are symlinks — never edit them directly; edit `AGENTS.md`.
+
+### Creating symlinks
+
+```bash
+ln -s AGENTS.md CLAUDE.md
+ln -s AGENTS.md QWEN.md
+ln -s .agents .claude
+ln -s .agents .qwen
+```
