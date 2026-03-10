@@ -36,7 +36,7 @@
   - [9.3. Creating symlinks](#93-creating-symlinks)
 - [10. Checklist before publishing](#10-checklist-before-publishing)
 
-Use this file when configuring the repository structure, templates, editor settings, and deployment infrastructure.
+Use this file when configuring the repository structure, templates, editor settings, and deployment infrastructure. It also covers change management — how to keep artifacts in sync when something changes, and a pre-publish checklist to verify everything is in order.
 
 ---
 
