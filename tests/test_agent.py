@@ -86,14 +86,14 @@ class TestAgentOutput:
         
         assert isinstance(output["tool_calls"], list), "'tool_calls' must be an array"
 
-    def test_tool_calls_is_empty_for_task_1(self):
-        """Test that 'tool_calls' is empty for Task 1 (no tools yet)."""
-        result = run_agent("What does REST stand for?")
+    def test_output_has_source_field(self):
+        """Test that output contains 'source' field for Task 2."""
+        result = run_agent("How do you resolve a merge conflict?")
         
         assert result.returncode == 0, f"Agent failed: {result.stderr}"
         output = json.loads(result.stdout)
         
-        assert output["tool_calls"] == [], "'tool_calls' should be empty for Task 1"
+        assert "source" in output, "Output must contain 'source' field"
 
     def test_rest_question(self):
         """Test the specific REST question from the task description."""
@@ -143,3 +143,61 @@ class TestAgentErrors:
         
         # stderr may contain debug messages (or be empty)
         # We just verify stdout is clean
+
+
+class TestTask2DocumentationAgent:
+    """Task 2 regression tests for the documentation agent with tools."""
+
+    def test_merge_conflict_question_uses_read_file(self):
+        """Test that merge conflict question triggers read_file tool."""
+        result = run_agent("How do you resolve a merge conflict?")
+        
+        assert result.returncode == 0, f"Agent failed: {result.stderr}"
+        output = json.loads(result.stdout)
+        
+        # Should have answer
+        assert "answer" in output
+        assert isinstance(output["answer"], str)
+        assert len(output["answer"].strip()) > 0
+        
+        # Should have source (may be empty if LLM doesn't format it correctly)
+        assert "source" in output
+        
+        # Should have tool calls
+        assert "tool_calls" in output
+        assert isinstance(output["tool_calls"], list)
+        assert len(output["tool_calls"]) > 0, "Should have at least one tool call"
+        
+        # Should have used read_file (either directly or after list_files)
+        tools_used = [call["tool"] for call in output["tool_calls"]]
+        assert "read_file" in tools_used, "Should use read_file tool"
+        
+        # If source is present, it should reference git wiki
+        if output.get("source"):
+            assert "git" in output["source"].lower(), f"Source should reference git: {output['source']}"
+
+    def test_wiki_files_question_uses_list_files(self):
+        """Test that wiki files question triggers list_files tool."""
+        result = run_agent("What files are in the wiki directory?")
+        
+        assert result.returncode == 0, f"Agent failed: {result.stderr}"
+        output = json.loads(result.stdout)
+        
+        # Should have answer
+        assert "answer" in output
+        assert isinstance(output["answer"], str)
+        assert len(output["answer"].strip()) > 0
+        
+        # Should have tool calls
+        assert "tool_calls" in output
+        assert isinstance(output["tool_calls"], list)
+        assert len(output["tool_calls"]) > 0, "Should have at least one tool call"
+        
+        # Should have used list_files
+        tools_used = [call["tool"] for call in output["tool_calls"]]
+        assert "list_files" in tools_used, "Should use list_files tool"
+        
+        # The list_files call should have wiki as path
+        list_files_calls = [c for c in output["tool_calls"] if c["tool"] == "list_files"]
+        assert any(c["args"].get("path") == "wiki" for c in list_files_calls), \
+            "list_files should be called with path='wiki'"
