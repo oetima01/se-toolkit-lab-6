@@ -201,3 +201,60 @@ class TestTask2DocumentationAgent:
         list_files_calls = [c for c in output["tool_calls"] if c["tool"] == "list_files"]
         assert any(c["args"].get("path") == "wiki" for c in list_files_calls), \
             "list_files should be called with path='wiki'"
+
+
+class TestTask3SystemAgent:
+    """Task 3 regression tests for the system agent with query_api tool."""
+
+    def test_framework_question_uses_read_file(self):
+        """Test that framework question triggers read_file tool."""
+        result = run_agent("What Python web framework does the backend use?")
+        
+        assert result.returncode == 0, f"Agent failed: {result.stderr}"
+        output = json.loads(result.stdout)
+        
+        # Should have answer
+        assert "answer" in output
+        assert isinstance(output["answer"], str)
+        assert len(output["answer"].strip()) > 0
+        
+        # Should have tool calls
+        assert "tool_calls" in output
+        assert isinstance(output["tool_calls"], list)
+        assert len(output["tool_calls"]) > 0, "Should have at least one tool call"
+        
+        # Should have used read_file on backend code
+        tools_used = [call["tool"] for call in output["tool_calls"]]
+        assert "read_file" in tools_used, "Should use read_file tool"
+        
+        # Answer should mention FastAPI
+        assert "fastapi" in output["answer"].lower(), \
+            f"Answer should mention FastAPI: {output['answer'][:200]}"
+
+    def test_api_query_question_uses_query_api(self):
+        """Test that data query question triggers query_api tool."""
+        result = run_agent("How many items are in the database? Query the API to find out.")
+        
+        assert result.returncode == 0, f"Agent failed: {result.stderr}"
+        output = json.loads(result.stdout)
+        
+        # Should have answer
+        assert "answer" in output
+        assert isinstance(output["answer"], str)
+        
+        # Should have tool calls
+        assert "tool_calls" in output
+        assert isinstance(output["tool_calls"], list)
+        assert len(output["tool_calls"]) > 0, "Should have at least one tool call"
+        
+        # Should have used query_api
+        tools_used = [call["tool"] for call in output["tool_calls"]]
+        assert "query_api" in tools_used, "Should use query_api tool"
+        
+        # The query_api call should use GET method and /items/ path
+        query_api_calls = [c for c in output["tool_calls"] if c["tool"] == "query_api"]
+        assert len(query_api_calls) > 0, "Should have at least one query_api call"
+        assert any(
+            c["args"].get("method") == "GET" and "/items" in c["args"].get("path", "")
+            for c in query_api_calls
+        ), "query_api should be called with GET /items/"
