@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-CLI agent with tools (read_file, list_files) and agentic loop.
+CLI agent with tools (read_file, list_files, query_api) and agentic loop.
 
 Usage:
     uv run agent.py "Your question here"
 
 Output:
-    JSON with "answer", "source", and "tool_calls" fields to stdout.
+    JSON with "answer", "source" (optional), and "tool_calls" fields to stdout.
     All debug output goes to stderr.
 """
 
@@ -17,8 +17,9 @@ import httpx
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Load environment variables from .env.agent.secret
+# Load environment variables from both .env.agent.secret and .env.docker.secret
 load_dotenv('.env.agent.secret')
+load_dotenv('.env.docker.secret', override=False)  # Don't override LLM settings
 
 # Project root for file operations
 PROJECT_ROOT = Path(__file__).parent.resolve()
@@ -26,20 +27,34 @@ PROJECT_ROOT = Path(__file__).parent.resolve()
 # Maximum tool calls per question
 MAX_TOOL_CALLS = 10
 
-# System prompt for Task 2 - instructs LLM to use tools and cite sources
-SYSTEM_PROMPT = """You are a helpful assistant with access to a project wiki.
-You have two tools available:
+# System prompt for Task 3 - guides tool selection
+SYSTEM_PROMPT = """You are a helpful assistant with access to a project wiki, source code, and a live backend API.
+
+You have three tools available:
 1. list_files - List files in a directory
 2. read_file - Read the contents of a file
+3. query_api - Call the backend API to query data or test endpoints
 
-When asked a question about the project:
-- Use list_files to discover files in the wiki directory
-- Use read_file to read specific files and find answers
-- Always include the source file path and section anchor in your answer
-- Format source as: wiki/filename.md#section-anchor
+Tool selection guidance:
+- For project documentation, workflows, or concepts: use list_files and read_file on wiki/
+- For source code, framework details, or configuration: use read_file on backend/, frontend/, or root files
+- For live data, item counts, scores, or API behavior: use query_api
+- For errors or bugs: first use query_api to reproduce the error, then read_file to diagnose the root cause
 
-Think step by step. First explore what files exist, then read relevant files to find the answer.
-Only give your final answer when you have found the information in the wiki.
+When using query_api:
+- Use GET for reading data
+- Use POST for creating data
+- Include body parameter for POST/PUT/PATCH requests with JSON data
+- Common endpoints: /items/, /analytics/completion-rate, /analytics/top-learners, /analytics/scores
+
+When answering:
+- Always include the source file path and section anchor if you found the answer in a file
+- Format source as: path/to/file.md#section-anchor
+- For API queries, the source can be the API endpoint (e.g., "API: GET /items/")
+- For wiki answers, cite the specific section
+
+Think step by step. Explore what files exist, read relevant files, query the API when needed, and provide comprehensive answers.
+Only give your final answer when you have found the information.
 """
 
 # Tool definitions for OpenAI-compatible function calling
@@ -54,7 +69,7 @@ TOOLS = [
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Relative path from project root (e.g., 'wiki/git.md')"
+                        "description": "Relative path from project root (e.g., 'wiki/git.md', 'backend/app/main.py')"
                     }
                 },
                 "required": ["path"]
@@ -71,10 +86,36 @@ TOOLS = [
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Relative directory path from project root (e.g., 'wiki')"
+                        "description": "Relative directory path from project root (e.g., 'wiki', 'backend/app')"
                     }
                 },
                 "required": ["path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_api",
+            "description": "Call the backend API to query data, test endpoints, or check API behavior. Use for live data queries, item counts, scores, or reproducing errors.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "method": {
+                        "type": "string",
+                        "description": "HTTP method (GET, POST, PUT, DELETE, PATCH)",
+                        "enum": ["GET", "POST", "PUT", "DELETE", "PATCH"]
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "API path starting with / (e.g., '/items/', '/analytics/completion-rate?lab=lab-01')"
+                    },
+                    "body": {
+                        "type": "string",
+                        "description": "Optional JSON request body for POST/PUT/PATCH requests"
+                    }
+                },
+                "required": ["method", "path"]
             }
         }
     }
@@ -133,6 +174,57 @@ def list_files(path: str) -> str:
         return f"Error listing directory: {e}"
 
 
+def query_api(method: str, path: str, body: str = None) -> str:
+    """Call the backend API with authentication."""
+    # Get configuration from environment
+    lms_api_key = os.getenv('LMS_API_KEY')
+    agent_api_base_url = os.getenv('AGENT_API_BASE_URL', 'http://localhost:42002')
+    
+    if not lms_api_key:
+        return "Error: LMS_API_KEY not configured in environment."
+    
+    # Build URL
+    url = f"{agent_api_base_url.rstrip('/')}{path}"
+    
+    # Prepare headers
+    headers = {
+        'Authorization': f'Bearer {lms_api_key}',
+        'Content-Type': 'application/json'
+    }
+    
+    print(f"Calling API: {method} {url}", file=sys.stderr)
+    
+    try:
+        # Make request
+        if method in ['GET', 'DELETE']:
+            response = httpx.get(url, headers=headers, timeout=30.0)
+        elif method in ['POST', 'PUT', 'PATCH']:
+            data = json.loads(body) if body else None
+            response = httpx.request(method, url, headers=headers, json=data, timeout=30.0)
+        else:
+            return f"Error: Unsupported method '{method}'"
+        
+        # Build response
+        result = {
+            'status_code': response.status_code,
+            'body': response.text[:5000]  # Truncate large responses
+        }
+        
+        return json.dumps(result)
+        
+    except httpx.HTTPStatusError as e:
+        return json.dumps({
+            'status_code': e.response.status_code,
+            'body': e.response.text[:1000]
+        })
+    except httpx.RequestError as e:
+        return f"Error: Request failed - {str(e)}"
+    except json.JSONDecodeError as e:
+        return f"Error: Invalid JSON body - {str(e)}"
+    except Exception as e:
+        return f"Error: {str(e)}"
+
+
 def execute_tool(tool_name: str, args: dict) -> str:
     """Execute a tool and return the result."""
     print(f"Executing tool: {tool_name}({args})", file=sys.stderr)
@@ -141,6 +233,12 @@ def execute_tool(tool_name: str, args: dict) -> str:
         return read_file(args.get('path', ''))
     elif tool_name == 'list_files':
         return list_files(args.get('path', ''))
+    elif tool_name == 'query_api':
+        return query_api(
+            args.get('method', 'GET'),
+            args.get('path', ''),
+            args.get('body')
+        )
     else:
         return f"Error: Unknown tool '{tool_name}'"
 
@@ -173,6 +271,33 @@ def call_llm(messages: list, api_key: str, api_base: str, model: str, with_tools
     return response.json()
 
 
+def extract_source_from_answer(answer: str) -> str:
+    """Extract source reference from the answer text."""
+    import re
+    
+    # Look for wiki/...#... pattern
+    source_match = re.search(r'(wiki/[\w\-/]+\.md#[\w\-]+)', answer)
+    if source_match:
+        return source_match.group(1)
+    
+    # Try to find just the file path
+    file_match = re.search(r'(wiki/[\w\-/]+\.md)', answer)
+    if file_match:
+        return file_match.group(1)
+    
+    # Look for backend source files
+    backend_match = re.search(r'(backend/[\w\-/]+\.(py|md))', answer)
+    if backend_match:
+        return backend_match.group(1)
+    
+    # Look for API endpoint references
+    api_match = re.search(r'API:\s*(GET|POST|PUT|DELETE|PATCH)\s+(/[^\s]+)', answer)
+    if api_match:
+        return f"{api_match.group(2)}"
+    
+    return ""
+
+
 def run_agentic_loop(question: str) -> dict:
     """Run the agentic loop: LLM → tool calls → execute → back to LLM."""
     # Get configuration from environment
@@ -181,7 +306,7 @@ def run_agentic_loop(question: str) -> dict:
     model = os.getenv('LLM_MODEL')
     
     if not all([api_key, api_base, model]):
-        raise ValueError("Missing required environment variables")
+        raise ValueError("Missing required LLM environment variables")
     
     # Initialize message history
     messages = [
@@ -215,19 +340,10 @@ def run_agentic_loop(question: str) -> dict:
         if not tool_calls:
             # No tool calls - LLM provided final answer
             print("No tool calls - final answer received", file=sys.stderr)
-            answer = assistant_message.get('content', '')
+            answer = assistant_message.get('content') or ""
             
-            # Extract source from answer (look for wiki/...#... pattern)
-            source = ""
-            import re
-            source_match = re.search(r'(wiki/[\w\-/]+\.md#[\w\-]+)', answer)
-            if source_match:
-                source = source_match.group(1)
-            else:
-                # Try to find just the file path
-                file_match = re.search(r'(wiki/[\w\-/]+\.md)', answer)
-                if file_match:
-                    source = file_match.group(1)
+            # Extract source from answer
+            source = extract_source_from_answer(answer)
             
             return {
                 'answer': answer.strip(),
