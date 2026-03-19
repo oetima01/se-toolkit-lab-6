@@ -47,6 +47,9 @@ TOOL SELECTION:
 - Router questions: Use list_files on backend/app/routers/, read ALL router files, then list them all with their domains
 - API questions: Use query_api to get data, count results, give exact number
 - Bug questions: FIRST use query_api to reproduce the error, THEN use read_file to find the bug in source code
+  - When reading code for bugs, look for: 
+    (1) division operations where divisor could be 0 (e.g., `x / total_learners` without checking if total_learners > 0)
+    (2) sorting on nullable fields from SQL aggregations (e.g., `sorted(rows, key=lambda r: r.avg_score)` where avg_score from func.avg() could be None)
 - Auth questions: Use query_api with no_auth=true to test what happens without authentication
 
 ANSWER FORMAT:
