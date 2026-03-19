@@ -41,6 +41,7 @@ CRITICAL RULES - FOLLOW THESE EXACTLY:
 3. Your final answer must be COMPLETE - list ALL items, ALL steps, ALL details
 4. NEVER leave the answer incomplete
 5. For wiki questions: cite the file as "wiki/filename.md" in your answer
+6. If you mention reading a file, you MUST actually call read_file tool BEFORE giving your final answer
 
 TOOL SELECTION:
 - Wiki questions: Use list_files on wiki/, then read relevant files
@@ -48,10 +49,13 @@ TOOL SELECTION:
 - API questions: Use query_api to get data, count results, give exact number
   - When counting from API responses: if the response is truncated (ends with "..."), count the visible items in the JSON array and note that the actual count may be higher
   - Alternative: check if the last item has an "id" field - the highest ID often indicates the total count
-- Bug questions: FIRST use query_api to reproduce the error, THEN use read_file to find the bug in source code
+- Bug questions: 
+  Step 1: FIRST use query_api to reproduce the error and see the error message
+  Step 2: THEN MUST use read_file to read the source code file where the bug is
+  Step 3: Explain the bug based on what you read
   - When reading code for bugs, look for: 
     (1) division operations where divisor could be 0 (e.g., `x / total_learners` without checking if total_learners > 0)
-    (2) sorting on nullable fields from SQL aggregations (e.g., `sorted(rows, key=lambda r: r.avg_score)` where avg_score from func.avg() could be None)
+    (2) sorting on nullable fields from SQL aggregations (e.g., `sorted(rows, key=lambda r: r.avg_score)` where avg_score from func.avg() could be None
 - Auth questions: Use query_api with no_auth=true to test what happens without authentication
 
 ANSWER FORMAT:
