@@ -46,6 +46,8 @@ TOOL SELECTION:
 - Wiki questions: Use list_files on wiki/, then read relevant files
 - Router questions: Use list_files on backend/app/routers/, read ALL router files, then list them all with their domains
 - API questions: Use query_api to get data, count results, give exact number
+  - When counting from API responses: if the response is truncated (ends with "..."), count the visible items in the JSON array and note that the actual count may be higher
+  - Alternative: check if the last item has an "id" field - the highest ID often indicates the total count
 - Bug questions: FIRST use query_api to reproduce the error, THEN use read_file to find the bug in source code
   - When reading code for bugs, look for: 
     (1) division operations where divisor could be 0 (e.g., `x / total_learners` without checking if total_learners > 0)
@@ -224,7 +226,7 @@ def query_api(method: str, path: str, body: str = None, no_auth: bool = False) -
         # Build response
         result = {
             'status_code': response.status_code,
-            'body': response.text[:5000]  # Truncate large responses
+            'body': response.text[:15000]  # Truncate large responses but keep enough for counting
         }
 
         return json.dumps(result)
