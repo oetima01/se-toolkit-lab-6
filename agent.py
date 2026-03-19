@@ -28,42 +28,43 @@ PROJECT_ROOT = Path(__file__).parent.resolve()
 MAX_TOOL_CALLS = 10
 
 # System prompt for Task 3 - guides tool selection
-SYSTEM_PROMPT = """You are a helpful assistant with access to a project wiki, source code, and a live backend API.
+SYSTEM_PROMPT = """You are a helpful assistant that answers questions using a project wiki, source code, and a live backend API.
 
 You have three tools available:
 1. list_files - List files in a directory
-2. read_file - Read the contents of a file
-3. query_api - Call the backend API to query data or test endpoints
+2. read_file - Read the contents of a file  
+3. query_api - Call the backend API to query data
 
-Tool selection guidance:
-- For project documentation, workflows, or concepts: use list_files and read_file on wiki/
-- For source code, framework details, or configuration: use read_file on backend/, frontend/, or root files
-- For live data, item counts, scores, or API behavior: use query_api
-- For errors or bugs: first use query_api to reproduce the error, then read_file to diagnose the root cause
-- For tracing request flow: read docker-compose.yml, Caddyfile, Dockerfile, and main.py to understand how requests flow through the system
-- For comparing error handling: read both the ETL pipeline (etl.py) and API routers (routers/*.py) to compare strategies
+CRITICAL RULES - FOLLOW THESE EXACTLY:
+1. NEVER say "let me read", "let me check", "I'll examine" - just READ the file and give the answer
+2. After using tools 2-3 times, STOP and give your FINAL ANSWER
+3. Your final answer must be COMPLETE - list ALL items, ALL steps, ALL details
+4. NEVER leave the answer incomplete
+5. For wiki questions: cite the file as "wiki/filename.md" in your answer
 
-When using query_api:
-- Use GET for reading data
-- Use POST for creating data
-- Include body parameter for POST/PUT/PATCH requests with JSON data
-- Common endpoints: /items/, /learners/, /analytics/completion-rate, /analytics/top-learners, /analytics/scores
-- When counting items or learners: parse the JSON response body and count the array elements
+TOOL SELECTION:
+- Wiki questions: Use list_files on wiki/, then read relevant files
+- Router questions: Use list_files on backend/app/routers/, read ALL router files, then list them all with their domains
+- API questions: Use query_api to get data, count results, give exact number
+- Bug questions: FIRST use query_api to reproduce the error, THEN use read_file to find the bug in source code
+- Auth questions: Use query_api with no_auth=true to test what happens without authentication
 
-When analyzing for bugs:
-- Look for division operations that could divide by zero (e.g., `x / y` where y could be 0)
-- Look for sorting operations on values that could be None (e.g., `sorted(rows, key=lambda r: r.field)`)
-- Look for None-unsafe operations on API query results
+ANSWER FORMAT:
+- For lists: enumerate ALL items (e.g., "1. analytics - handles analytics endpoints...")
+- For counts: give exact number (e.g., "There are 42 items")
+- For wiki: cite source (e.g., "Source: wiki/github.md")
+- For bugs: name the issue and file (e.g., "Division by zero in backend/app/routers/analytics.py")
 
-When answering:
-- Always include the source file path and section anchor if you found the answer in a file
-- Format source as: path/to/file.md#section-anchor
-- For API queries, the source can be the API endpoint (e.g., "API: GET /items/")
-- For wiki answers, cite the specific section
-- When counting from API responses, explicitly state what you counted
+EXAMPLE - Router question:
+"After examining the backend routers, here are all API router modules:
+1. analytics.py - handles analytics endpoints like /analytics/scores, /analytics/completion-rate
+2. interactions.py - handles interaction logging
+3. items.py - handles item CRUD operations
+4. learners.py - handles learner management  
+5. pipeline.py - handles ETL pipeline sync
+Source: backend/app/routers/"
 
-Think step by step. Explore what files exist, read relevant files, query the API when needed, and provide comprehensive answers.
-Only give your final answer when you have found the information.
+NOW ANSWER THE QUESTION. Be complete. Stop after 2-3 tool calls and give your final answer.
 """
 
 # Tool definitions for OpenAI-compatible function calling
@@ -122,6 +123,10 @@ TOOLS = [
                     "body": {
                         "type": "string",
                         "description": "Optional JSON request body for POST/PUT/PATCH requests"
+                    },
+                    "no_auth": {
+                        "type": "boolean",
+                        "description": "If true, omit the Authorization header (use for testing auth errors). Default: false"
                     }
                 },
                 "required": ["method", "path"]
@@ -183,26 +188,26 @@ def list_files(path: str) -> str:
         return f"Error listing directory: {e}"
 
 
-def query_api(method: str, path: str, body: str = None) -> str:
+def query_api(method: str, path: str, body: str = None, no_auth: bool = False) -> str:
     """Call the backend API with authentication."""
     # Get configuration from environment
     lms_api_key = os.getenv('LMS_API_KEY')
     agent_api_base_url = os.getenv('AGENT_API_BASE_URL', 'http://localhost:42002')
-    
-    if not lms_api_key:
-        return "Error: LMS_API_KEY not configured in environment."
-    
+
     # Build URL
     url = f"{agent_api_base_url.rstrip('/')}{path}"
-    
-    # Prepare headers
+
+    # Prepare headers - only add auth if no_auth is False
     headers = {
-        'Authorization': f'Bearer {lms_api_key}',
         'Content-Type': 'application/json'
     }
-    
-    print(f"Calling API: {method} {url}", file=sys.stderr)
-    
+    if not no_auth and lms_api_key:
+        headers['Authorization'] = f'Bearer {lms_api_key}'
+    elif not lms_api_key and not no_auth:
+        return "Error: LMS_API_KEY not configured in environment."
+
+    print(f"Calling API: {method} {url} (auth={not no_auth})", file=sys.stderr)
+
     try:
         # Make request
         if method in ['GET', 'DELETE']:
@@ -212,15 +217,15 @@ def query_api(method: str, path: str, body: str = None) -> str:
             response = httpx.request(method, url, headers=headers, json=data, timeout=30.0)
         else:
             return f"Error: Unsupported method '{method}'"
-        
+
         # Build response
         result = {
             'status_code': response.status_code,
             'body': response.text[:5000]  # Truncate large responses
         }
-        
+
         return json.dumps(result)
-        
+
     except httpx.HTTPStatusError as e:
         return json.dumps({
             'status_code': e.response.status_code,
@@ -237,7 +242,7 @@ def query_api(method: str, path: str, body: str = None) -> str:
 def execute_tool(tool_name: str, args: dict) -> str:
     """Execute a tool and return the result."""
     print(f"Executing tool: {tool_name}({args})", file=sys.stderr)
-    
+
     if tool_name == 'read_file':
         return read_file(args.get('path', ''))
     elif tool_name == 'list_files':
@@ -246,7 +251,8 @@ def execute_tool(tool_name: str, args: dict) -> str:
         return query_api(
             args.get('method', 'GET'),
             args.get('path', ''),
-            args.get('body')
+            args.get('body'),
+            args.get('no_auth', False)
         )
     else:
         return f"Error: Unknown tool '{tool_name}'"
@@ -283,27 +289,47 @@ def call_llm(messages: list, api_key: str, api_base: str, model: str, with_tools
 def extract_source_from_answer(answer: str) -> str:
     """Extract source reference from the answer text."""
     import re
-    
+
     # Look for wiki/...#... pattern
     source_match = re.search(r'(wiki/[\w\-/]+\.md#[\w\-]+)', answer)
     if source_match:
         return source_match.group(1)
-    
+
     # Try to find just the file path
     file_match = re.search(r'(wiki/[\w\-/]+\.md)', answer)
     if file_match:
         return file_match.group(1)
-    
+
     # Look for backend source files
     backend_match = re.search(r'(backend/[\w\-/]+\.(py|md))', answer)
     if backend_match:
         return backend_match.group(1)
-    
+
     # Look for API endpoint references
     api_match = re.search(r'API:\s*(GET|POST|PUT|DELETE|PATCH)\s+(/[^\s]+)', answer)
     if api_match:
         return f"{api_match.group(2)}"
-    
+
+    # Look for Source: pattern
+    source_pattern = re.search(r'Source:\s*(wiki/[\w\-/]+\.md|backend/[\w\-/]+\.(py|md))', answer, re.IGNORECASE)
+    if source_pattern:
+        return source_pattern.group(1)
+
+    # Look for "in the <file>" pattern
+    in_file_match = re.search(r'in the\s+(wiki/[\w\-/]+\.md|backend/[\w\-/]+\.(py|md))', answer, re.IGNORECASE)
+    if in_file_match:
+        return in_file_match.group(1)
+
+    # Look for common wiki file references
+    wiki_patterns = [
+        (r'github\.md|git\.md|git-workflow\.md', 'wiki/github.md'),
+        (r'docker\.md|docker-compose\.md', 'wiki/docker.md'),
+        (r'ssh\.md|vm\.md', 'wiki/ssh.md'),
+    ]
+    for pattern, source in wiki_patterns:
+        if re.search(pattern, answer, re.IGNORECASE):
+            return source
+
     return ""
 
 
